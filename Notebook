@@ -1,0 +1,129 @@
+import torch
+import pandas as pd
+import numpy as np
+
+from datasets import Dataset
+from transformers import (
+    Trainer,
+    TrainingArguments,
+    DataCollatorWithPadding,
+    RobertaPreTrainedModel,
+    RobertaModel,
+    AutoTokenizer,
+    AutoConfig,
+    logging,
+)
+from transformers.modeling_outputs import TokenClassifierOutput
+
+
+logging.set_verbosity(logging.WARNING)
+
+
+
+class CFG:
+    
+    n_folds = 5
+    model_path = "../input/5f-rob-b-nbme/fold{fold}"
+    args = TrainingArguments(
+        output_dir=".",
+        per_device_eval_batch_size=64,
+        dataloader_num_workers=2,
+    )
+
+test_df = pd.read_csv("../input/nbme-score-clinical-patient-notes/test.csv")
+notes_df = pd.read_csv("../input/nbme-score-clinical-patient-notes/patient_notes.csv") 
+feats_df = pd.read_csv("../input/nbme-score-clinical-patient-notes/features.csv")
+merged = test_df.merge(notes_df, how="left")   
+merged = merged.merge(feats_df, how="left")
+merged.head()
+
+def process_feature_text(text):
+    return text.replace("-OR-", ";-").replace("-", " ")
+
+def tokenize(examples):
+    tokenized_inputs =  tokenizer(
+        examples["feature_text"],
+        examples["pn_history"],
+        padding=True,
+        max_length=416,
+        truncation="only_second",
+        return_offsets_mapping=True
+    )
+    tokenized_inputs["sequence_ids"] = [tokenized_inputs.sequence_ids(i) for i in range(len(tokenized_inputs["input_ids"]))]
+    return tokenized_inputs
+
+ds = Dataset.from_pandas(merged)
+
+ds = ds.map(lambda x: {"feature_text": process_feature_text(x["feature_text"])})
+
+tokenizer = AutoTokenizer.from_pretrained(CFG.model_path.format(fold=0))
+tokenized_ds = ds.map(tokenize, batched=True)
+
+tokenized_ds
+
+# mostly copied from: https://github.com/huggingface/transformers/blob/master/src/transformers/models/roberta/modeling_roberta.py
+class HybridRoberta(RobertaPreTrainedModel):
+
+    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
+
+    def __init__(self, config):
+        super().__init__(config)
+
+        self.roberta = RobertaModel(config, add_pooling_layer=False)
+        classifier_dropout = (
+            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
+        )
+        self.dropout = torch.nn.Dropout(classifier_dropout)
+        self.classifier = torch.nn.Linear(config.hidden_size, 1)
+
+   
+def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
+        r"""
+        labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
+            Labels for computing the token classification loss. Indices should be in `[0, ..., config.num_labels - 1]`.
+        """
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        outputs = self.roberta(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        sequence_output = outputs[0]
+
+        sequence_output = self.dropout(sequence_output)
+        logits = self.classifier(sequence_output)
+
+        loss = None
+        if labels is not None:
+            loss_fct = torch.nn.BCEWithLogitsLoss(reduction="none")
+            loss = loss_fct(logits.view(-1, 1), labels.view(-1, 1))
+            
+            loss = torch.masked_select(loss, labels.view(-1, 1) > -1).mean()
+
+        return TokenClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
