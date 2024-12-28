@@ -18,8 +18,6 @@ from transformers.modeling_outputs import TokenClassifierOutput
 
 logging.set_verbosity(logging.WARNING)
 
-
-
 class CFG:
     
     n_folds = 5
@@ -77,8 +75,7 @@ class HybridRoberta(RobertaPreTrainedModel):
         self.dropout = torch.nn.Dropout(classifier_dropout)
         self.classifier = torch.nn.Linear(config.hidden_size, 1)
 
-   
-def forward(
+    def forward(
         self,
         input_ids=None,
         attention_mask=None,
@@ -127,3 +124,85 @@ def forward(
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+
+
+def sigmoid(z):
+    return 1/(1 + np.exp(-z))
+
+def get_location_predictions(dataset, preds, test=False):
+    """
+    It's easier to run CV if we don't convert predictions into
+    the format expected at test time.
+    
+    If `test=True` then it will turn the predictions into the format
+    expected for submission
+    """
+    all_predictions = []
+    for pred, offsets, seq_ids in zip(preds, dataset["offset_mapping"], dataset["sequence_ids"]):
+        pred = sigmoid(pred)
+        start_idx = None
+        current_preds = []
+        for p, o, s_id in zip(pred, offsets, seq_ids):
+            if s_id is None or s_id == 0:
+                continue
+                
+            if p > 0.5:
+                if start_idx is None:
+                    start_idx = o[0]
+                end_idx = o[1]
+            elif start_idx is not None:
+                if test:
+                    current_preds.append(f"{start_idx} {end_idx}")
+                else:
+                    current_preds.append((start_idx, end_idx))
+                start_idx = None
+        
+        if test:
+            all_predictions.append("; ".join(current_preds))
+        else:
+            all_predictions.append(current_preds)
+    
+    return all_predictions
+
+%%capture
+
+%env TOKENIZERS_PARALLELISM=true
+
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+config = AutoConfig.from_pretrained(CFG.model_path.format(fold=0))
+
+all_preds = None
+for fold in range(CFG.n_folds):
+
+
+    model = HybridRoberta.from_pretrained(CFG.model_path.format(fold=fold), config=config)
+
+    trainer = Trainer(
+        model=model,
+        args=CFG.args,
+        data_collator=data_collator,
+        tokenizer=tokenizer,
+    )
+
+    predictions = trainer.predict(tokenized_ds)
+
+    if all_preds is None:
+        all_preds = predictions.predictions.astype(np.float32)
+    else:
+        all_preds += predictions.predictions.astype(np.float32)
+
+
+    torch.cuda.empty_cache()
+    
+all_preds /= CFG.n_folds
+
+location_predictions = get_location_predictions(tokenized_ds, all_preds.squeeze(), test=True)
+
+submission_df = pd.DataFrame(data={
+            "id": tokenized_ds["id"], 
+            "location": location_predictions
+        })
+
+submission_df.to_csv("submission.csv", index=False)
+display(submission_df.head())
