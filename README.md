@@ -1,4 +1,3 @@
-# NBME---Score-Clinical-Patient-Notes
 # Clinical Concept Identification in Medical Notes
 
 ## Overview
@@ -86,6 +85,3 @@ This project is based on the NBME - Score Clinical Patient Notes competition. Sp
 - National Board of Medical Examiners® (NBME®)
 - Dr Le An Ha from the University of Wolverhampton's Research Group in Computational Linguistics
 - HuggingFace's Transformers library
-
-## License
-[Include your license information here]
