@@ -40,44 +40,96 @@ datasets
 pip install torch pandas numpy transformers datasets
 ```
 
-## 📁 Data Structure
+## 📊 Dataset Description
 
-The model expects three CSV files:
-- `test.csv`: Test set data
-- `patient_notes.csv`: Patient clinical notes
-- `features.csv`: Feature descriptions
+The dataset consists of clinical patient notes and their annotations from the NBME competition. It includes approximately 40,000 patient notes with feature annotations for medical concept extraction.
 
-## 🚀 Usage
+### Data Files
 
-1. Configure settings in `CFG` class:
+#### 1. Patient Notes (`patient_notes.csv`)
+- Collection of ~40,000 patient history records
+- **Fields:**
+  - `pn_num`: Unique identifier for each note
+  - `case_num`: Clinical case identifier
+  - `pn_history`: Full text of patient encounter
+- Notes in test set are excluded from public version
+- Suitable for unsupervised learning on unannotated notes
+
+#### 2. Features (`features.csv`)
+Clinical case rubrics containing key medical concepts
+- **Fields:**
+  - `feature_num`: Unique feature identifier
+  - `case_num`: Case identifier
+  - `feature_text`: Detailed feature description
+
+#### 3. Training Data (`train.csv`)
+Annotated subset of 1,000 patient notes
+- 100 notes for each of 10 clinical cases
+- **Fields:**
+  - `id`: Unique identifier for note/feature pair
+  - `pn_num`: Patient note reference
+  - `feature_num`: Feature reference
+  - `case_num`: Clinical case identifier
+  - `annotation`: Feature text instances
+  - `location`: Character spans of annotations
+    - Multiple spans separated by semicolons
+    - Format: "start_idx end_idx; start_idx end_idx"
+
+#### 4. Test Data
+- Contains ~2,000 patient notes
+- Uses same clinical cases as training set
+- Added to `patient_notes.csv` during evaluation
+- Format matches training data structure
+
+### Data Structure Example
+
 ```python
-class CFG:
-    n_folds = 5
-    model_path = "../input/5f-rob-b-nbme/fold{fold}"
+# Patient Note Example
+{
+    "pn_num": "100",
+    "case_num": "1",
+    "pn_history": "Patient presents with..."
+}
+
+# Feature Example
+{
+    "feature_num": "1",
+    "case_num": "1",
+    "feature_text": "shortness of breath"
+}
+
+# Annotation Example
+{
+    "id": "1",
+    "pn_num": "100",
+    "feature_num": "1",
+    "case_num": "1",
+    "annotation": "dyspnea",
+    "location": "45 51; 67 89"
+}
 ```
 
-2. Load and preprocess data:
-```python
-test_df = pd.read_csv("../input/nbme-score-clinical-patient-notes/test.csv")
-notes_df = pd.read_csv("../input/nbme-score-clinical-patient-notes/patient_notes.csv")
-feats_df = pd.read_csv("../input/nbme-score-clinical-patient-notes/features.csv")
-```
+### Dataset Statistics
+- Total Patient Notes: 42,126
+- Annotated Notes: 1,000
+- Clinical Cases: 10
+- Test Set Size: ~2,000 notes
+- Average Note Length: [Your average length]
+- Features per Case: [Your number]
 
-3. Run predictions:
-```python
-predictions = trainer.predict(tokenized_ds)
-```
-
-## 🔄 Data Processing Pipeline
-
-1. **Feature Text Processing**
-   - Replaces special characters
-   - Standardizes formatting
+### Data Preprocessing
+1. **Text Cleaning**
+   ```python
+   def process_feature_text(text):
+       return text.replace("-OR-", ";-").replace("-", " ")
+   ```
 
 2. **Tokenization**
-   - Maximum length: 416 tokens
-   - Returns offset mapping
-   - Truncation on second sequence
+   ```python
+   tokenizer = AutoTokenizer.from_pretrained(CFG.model_path.format(fold=0))
+   max_length = 416
+   truncation = "only_second"
+   ```
 
 3. **Prediction Processing**
    - Applies sigmoid activation
@@ -115,10 +167,6 @@ submission_df.to_csv("submission.csv", index=False)
 ## 🤝 Contributing
 
 Feel free to submit issues and enhancement requests!
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
