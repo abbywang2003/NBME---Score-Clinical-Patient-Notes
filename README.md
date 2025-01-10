@@ -114,8 +114,7 @@ Annotated subset of 1,000 patient notes
 - Annotated Notes: 1,000
 - Clinical Cases: 10
 - Test Set Size: ~2,000 notes
-- Average Note Length: [Your average length]
-- Features per Case: [Your number]
+- Features per Case: 1
 
 ### Data Preprocessing
 1. **Text Cleaning**
